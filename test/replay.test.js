@@ -172,3 +172,39 @@ test("stream reducer reports sawFinish and the chunk tally", () => {
 	assert.equal(reducer.sawFinish, true)
 	assert.equal(reducer.chunkTypes, "block-start:1,text-delta:1,finish:1")
 })
+
+test("stream reducer accumulates reasoning text", () => {
+	const reducer = createStreamReducer()
+	reducer.push({ type: "reasoning-delta", index: 0, text: "thinking " })
+	reducer.push({ type: "reasoning-delta", index: 0, text: "hard" })
+	assert.equal(reducer.reasoning, "thinking hard")
+})
+
+test("buildRetryRequest carries the rejected attempt's reasoning", () => {
+	const request = buildRetryRequest({
+		snapshot,
+		assistant,
+		instruction: "INSTRUCTION",
+		pluginName: "p",
+		toolCalls: [{ id: "call-1", name: "shell", arguments: '{"cmd":"ls"}' }],
+		reasoning: "I should inspect the repo first.",
+	})
+	const attempted = request.messages[snapshot.messages.length + 2]
+	assert.equal(attempted.content[0].type, "reasoning")
+	assert.equal(attempted.content[0].text, "I should inspect the repo first.")
+	assert.equal(attempted.content[1].type, "tool-call")
+})
+
+test("buildRetryRequest omits an empty reasoning block", () => {
+	const request = buildRetryRequest({
+		snapshot,
+		assistant,
+		instruction: "INSTRUCTION",
+		pluginName: "p",
+		toolCalls: [{ id: "call-1", name: "shell", arguments: "{}" }],
+		reasoning: "",
+	})
+	const attempted = request.messages[snapshot.messages.length + 2]
+	assert.equal(attempted.content.length, 1)
+	assert.equal(attempted.content[0].type, "tool-call")
+})

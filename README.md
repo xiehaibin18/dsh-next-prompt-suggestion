@@ -23,7 +23,7 @@ exact route GET /api/plugins/next-prompt-suggestion?session=<id>
 browser half ─► placeholder takeover: ghost node mirroring the native placeholder (hanging GET, instant)
 ```
 
-Invalidation is structural: every `turn/start` aborts any in-flight replay and drops the previous suggestion, so a suggestion can never outlive the turn it belongs to. The replay carries no `purpose` (it is an ordinary call through `ctx.llm.stream`) and never retries transport or rate-limit failures. When the model answers the instruction with a tool call, that attempt is rejected and retried exactly once with a synthetic rejection turn (the attempted tool-call message plus one error tool result per call); tools are never executed, and a second tool call gives up.
+Invalidation is structural: every `turn/start` aborts any in-flight replay and drops the previous suggestion, so a suggestion can never outlive the turn it belongs to. The replay carries no `purpose` (it is an ordinary call through `ctx.llm.stream`) and never retries transport or rate-limit failures. When the model answers the instruction with a tool call, that attempt is rejected and retried exactly once with a synthetic rejection turn: the attempted tool-call message - carrying the attempt's own reasoning, which thinking-mode providers require beside tool calls - plus one error tool result per call. Tools are never executed, and a second tool call gives up.
 
 ## Install
 
