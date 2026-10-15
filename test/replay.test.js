@@ -146,3 +146,29 @@ test("buildRetryRequest falls back to the instruction notice without complete ca
 	assert.ok(instruction.content[0].text.startsWith("INSTRUCTION"))
 	assert.ok(instruction.content[0].text.includes(TOOL_REJECTION_NOTICE))
 })
+
+test("stream reducer falls back to block-end text when no deltas arrived", () => {
+	const reducer = createStreamReducer()
+	assert.equal(
+		reducer.push({ type: "block-end", index: 0, block: { type: "text", text: "whole block" } }),
+		"continue",
+	)
+	assert.equal(reducer.text, "whole block")
+})
+
+test("stream reducer never double counts deltas and block-end text", () => {
+	const reducer = createStreamReducer()
+	reducer.push({ type: "text-delta", index: 0, text: "streamed" })
+	reducer.push({ type: "block-end", index: 0, block: { type: "text", text: "streamed" } })
+	assert.equal(reducer.text, "streamed")
+})
+
+test("stream reducer reports sawFinish and the chunk tally", () => {
+	const reducer = createStreamReducer()
+	assert.equal(reducer.sawFinish, false)
+	reducer.push({ type: "block-start", index: 0, blockType: "text" })
+	reducer.push({ type: "text-delta", index: 0, text: "x" })
+	reducer.push({ type: "finish" })
+	assert.equal(reducer.sawFinish, true)
+	assert.equal(reducer.chunkTypes, "block-start:1,text-delta:1,finish:1")
+})
