@@ -79,7 +79,7 @@ bun run test   # node --test over the pure modules
 
 - **Accept = direct DOM fill.** Tab inside the composer (or a click) fills an empty draft through the focused Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct; a non-empty draft falls back to clipboard copy. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
 - **Poll-based delivery.** The browser half polls the exact route every 4s while mounted instead of receiving a push; reconnect behavior is naturally correct because the host state is authoritative.
-- **Anchor invalidation is turn-level.** A suggestion survives minor draft edits (it is a pill, not ghost text), and disappears when the next turn starts or a newer suggestion replaces it.
+- **Visibility is draft-emptiness driven.** Typing hides the pill and clearing the draft brings it back (with one immediate poll refresh on clear, so a just-sent message does not flash a stale pill); it disappears for good when the next turn starts or a newer suggestion replaces it.
 
 ## License
 
