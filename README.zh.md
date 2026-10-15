@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的下一句输入建议插件：一次成功的人类回合结束后，原样重放该会话最后一次普通模型请求并追加一条 suggestion 指令，预测用户下一句最可能输入的内容，在输入框上方以悬浮胶囊展示。在输入框内按 Tab（或点击胶囊）即可把建议填入草稿，草稿非空时点击则复制到剪贴板。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的下一句输入建议插件：一次成功的人类回合结束后，原样重放该会话最后一次普通模型请求并追加一条 suggestion 指令，预测用户下一句最可能输入的内容，直接作为输入框的 placeholder 展示——与 Mentat 原版形态一致。空草稿时才显示（原生 placeholder 语义），在输入框内按 Tab 即填入草稿。
 
 设计移植自已验证的 [Mentat 下一句输入建议](https://github.com/Herbin-s/mentat/pull/199)，基于 DSH 的 Cordis 扩展点重建。
 
@@ -20,7 +20,7 @@ ctx.llm.stream() ─► 重放 [...捕获的 messages, 最终 assistant, <指令
         │
 exact 路由 GET /api/plugins/next-prompt-suggestion?session=<id>
         │
-浏览器半 ─► conversation.input.overlay 胶囊（挂载期间轮询）
+浏览器半 ─► placeholder 接管：镜像原生 placeholder 的 ghost 节点（挂载期间轮询）
 ```
 
 失效是结构性的：每个 `turn/start` 都会中止进行中的重放并丢弃上一条建议，建议不可能活过它所属的回合。重放不携带 `purpose`、绝不重试；任何工具调用增量都会整条丢弃建议。
@@ -77,9 +77,9 @@ bun run test   # node --test 覆盖纯逻辑模块
 
 ## 已知限制（v0）
 
-- **采纳 = 直接写入草稿。** 在输入框内按 Tab（或点击胶囊）通过聚焦的 Lexical 编辑器自身输入路径（`execCommand("insertText")`）填入空草稿，修订号与撤销历史保持正确；草稿非空时降级为复制到剪贴板。官方 `slash/input-insert-text` 通道需要精确匹配 draft 修订号，而该修订号目前无法跨插件边界读取——待出现修订号可观察对象或按会话作用域的 emit 后切换。
+- **采纳 = 直接写入草稿。** 在输入框内按 Tab 通过聚焦的 Lexical 编辑器自身输入路径（`execCommand("insertText")`）填入空草稿，修订号与撤销历史保持正确。官方 `slash/input-insert-text` 通道需要精确匹配 draft 修订号，而该修订号目前无法跨插件边界读取——待出现修订号可观察对象或按会话作用域的 emit 后切换。
 - **轮询式交付。** 浏览器半挂载期间每 4 秒轮询 exact 路由，而非接收推送；host 状态是权威数据源，重连行为天然正确。
-- **显隐由草稿空态驱动。** 输入时隐藏胶囊，清空草稿后恢复（清空时立即主动刷新一次建议，避免刚发送的消息闪现过期胶囊）；下一个回合开始或新建议到达时才真正失效。
+- **placeholder 接管，无本地显隐状态。** 建议寄生在原生 `[data-composer-placeholder]` 节点上：React 仅在空草稿时挂载该节点，MutationObserver 用同 class 的 ghost 节点镜像它的出现/重挂并承载建议文本——输入隐藏、清空恢复全部免费获得。建议在下一个回合开始或新建议到达时失效。
 
 ## 许可
 

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Next-prompt suggestion for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): after a successful human turn, the plugin replays the session's last model request verbatim with one appended suggestion-mode instruction, predicts what the user might naturally type next, and shows it as a subtle pill above the composer. Press Tab inside the composer (or click the pill) to fill the suggestion into an empty draft; clicking with a non-empty draft copies it instead.
+Next-prompt suggestion for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): after a successful human turn, the plugin replays the session's last model request verbatim with one appended suggestion-mode instruction, predicts what the user might naturally type next, and shows it as the composer's placeholder - the same shape as the original Mentat feature. The suggestion appears only while the draft is empty (native placeholder semantics), and Tab inside the composer fills it into the draft.
 
 Ported from the proven [Mentat next-prompt suggestion](https://github.com/Herbin-s/mentat/pull/199) design, rebuilt on DSH's Cordis extension points.
 
@@ -20,7 +20,7 @@ normalize ─► single line, ≤ max chars, quotes stripped, silent-on-doubt
         │
 exact route GET /api/plugins/next-prompt-suggestion?session=<id>
         │
-browser half ─► conversation.input.overlay pill (polls while mounted)
+browser half ─► placeholder takeover: ghost node mirroring the native placeholder (polls while mounted)
 ```
 
 Invalidation is structural: every `turn/start` aborts any in-flight replay and drops the previous suggestion, so a suggestion can never outlive the turn it belongs to. The replay carries no `purpose` (it is an ordinary call through `ctx.llm.stream`), never retries, and any tool-call delta rejects the whole suggestion.
@@ -77,9 +77,9 @@ bun run test   # node --test over the pure modules
 
 ## Known limitations (v0)
 
-- **Accept = direct DOM fill.** Tab inside the composer (or a click) fills an empty draft through the focused Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct; a non-empty draft falls back to clipboard copy. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
+- **Accept = direct DOM fill.** Tab inside the composer fills the empty draft through the focused Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
 - **Poll-based delivery.** The browser half polls the exact route every 4s while mounted instead of receiving a push; reconnect behavior is naturally correct because the host state is authoritative.
-- **Visibility is draft-emptiness driven.** Typing hides the pill and clearing the draft brings it back (with one immediate poll refresh on clear, so a just-sent message does not flash a stale pill); it disappears for good when the next turn starts or a newer suggestion replaces it.
+- **Placeholder takeover, no local visibility state.** The suggestion rides the native `[data-composer-placeholder]` node: React mounts that node only for an empty draft, and a MutationObserver mirrors its (re)appearance with a same-class ghost carrying the suggestion text — typing hides, clearing restores, all for free. The suggestion disappears when the next turn starts or a newer one replaces it.
 
 ## License
 
