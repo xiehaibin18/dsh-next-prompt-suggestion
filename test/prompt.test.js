@@ -6,7 +6,10 @@ import { nextPromptInstruction, normalizeSuggestion } from "../lib/prompt.js"
 test("instruction is a non-empty single-block text", () => {
 	assert.equal(typeof nextPromptInstruction, "string")
 	assert.ok(nextPromptInstruction.length > 100)
-	assert.ok(nextPromptInstruction.includes("SUGGESTION MODE"))
+	assert.ok(nextPromptInstruction.includes("placeholder"))
+	// No injection tells: no bracket template, no "not a user message" claim.
+	assert.equal(nextPromptInstruction.startsWith("["), false)
+	assert.equal(/not a user message/i.test(nextPromptInstruction), false)
 })
 
 test("normalizeSuggestion trims surrounding whitespace", () => {
