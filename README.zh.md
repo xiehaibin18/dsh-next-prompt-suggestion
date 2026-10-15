@@ -23,7 +23,7 @@ exact 路由 GET /api/plugins/next-prompt-suggestion?session=<id>
 浏览器半 ─► placeholder 接管：镜像原生 placeholder 的 ghost 节点（hanging GET，即时）
 ```
 
-失效是结构性的：每个 `turn/start` 都会中止进行中的重放并丢弃上一条建议，建议不可能活过它所属的回合。重放不携带 `purpose`、绝不重试；任何工具调用增量都会整条丢弃建议。
+失效是结构性的：每个 `turn/start` 都会中止进行中的重放并丢弃上一条建议，建议不可能活过它所属的回合。重放不携带 `purpose`，传输或限流失败不重试。若模型用工具调用回应指令，该次尝试会被拒绝并**恰好重试一轮**：追加被拒的工具调用消息，并为每个调用返回一条带拒绝说明的 error 工具结果；工具从不执行，第二次仍调工具则放弃。
 
 ## 安装
 
@@ -57,7 +57,7 @@ exact 路由 GET /api/plugins/next-prompt-suggestion?session=<id>
 | --- | --- | --- |
 | `enabled` | `true` | 捕获、生成与路由的总开关。 |
 | `maxSuggestionChars` | `200` | 接受的建议长度硬上限。 |
-| `latencyCapMs` | `15000` | 重放延迟上限；中止即丢弃，不重试。 |
+| `latencyCapMs` | `15000` | 整次生成（含首次尝试与那一轮工具调用重试）的延迟上限。 |
 | `routePath` | `/api/plugins/next-prompt-suggestion` | 提供实时建议的 exact 路由。 |
 
 ## 开发

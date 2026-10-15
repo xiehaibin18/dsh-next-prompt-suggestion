@@ -23,7 +23,7 @@ exact route GET /api/plugins/next-prompt-suggestion?session=<id>
 browser half ─► placeholder takeover: ghost node mirroring the native placeholder (hanging GET, instant)
 ```
 
-Invalidation is structural: every `turn/start` aborts any in-flight replay and drops the previous suggestion, so a suggestion can never outlive the turn it belongs to. The replay carries no `purpose` (it is an ordinary call through `ctx.llm.stream`), never retries, and any tool-call delta rejects the whole suggestion.
+Invalidation is structural: every `turn/start` aborts any in-flight replay and drops the previous suggestion, so a suggestion can never outlive the turn it belongs to. The replay carries no `purpose` (it is an ordinary call through `ctx.llm.stream`) and never retries transport or rate-limit failures. When the model answers the instruction with a tool call, that attempt is rejected and retried exactly once with a synthetic rejection turn (the attempted tool-call message plus one error tool result per call); tools are never executed, and a second tool call gives up.
 
 ## Install
 
@@ -57,7 +57,7 @@ All keys are optional; the exported Config schema owns the defaults.
 | --- | --- | --- |
 | `enabled` | `true` | Master switch for capture, generation, and the route. |
 | `maxSuggestionChars` | `200` | Hard cap on the accepted suggestion length. |
-| `latencyCapMs` | `15000` | Replay latency cap; aborted replays are discarded, never retried. |
+| `latencyCapMs` | `15000` | Latency cap for the whole generation, covering both the first attempt and the one tool-call retry round. |
 | `routePath` | `/api/plugins/next-prompt-suggestion` | Exact webserver route serving the live suggestion. |
 
 ## Development
