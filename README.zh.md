@@ -57,7 +57,7 @@ exact 路由 GET /api/plugins/next-prompt-suggestion?session=<id>
 | --- | --- | --- |
 | `enabled` | `true` | 捕获、生成与路由的总开关。 |
 | `maxSuggestionChars` | `200` | 接受的建议长度硬上限。 |
-| `latencyCapMs` | `20000` | 单次尝试的延迟上限；首次尝试与那一轮工具调用重试各自拥有独立预算。真正的过期防护是 turn/start 失效。 |
+| `latencyCapMs` | `30000` | 单次尝试的延迟上限；首次尝试与那一轮工具调用重试各自拥有独立预算。推理模型在输出建议前可能思考 10~20 秒，因此上限给得较宽；真正的过期防护是 turn/start 失效。 |
 | `routePath` | `/api/plugins/next-prompt-suggestion` | 提供实时建议的 exact 路由。 |
 
 ## 开发

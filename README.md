@@ -57,7 +57,7 @@ All keys are optional; the exported Config schema owns the defaults.
 | --- | --- | --- |
 | `enabled` | `true` | Master switch for capture, generation, and the route. |
 | `maxSuggestionChars` | `200` | Hard cap on the accepted suggestion length. |
-| `latencyCapMs` | `20000` | Per-attempt latency cap; the first attempt and the one tool-call retry round each get a fresh budget. Turn-start invalidation is the real staleness guard. |
+| `latencyCapMs` | `30000` | Per-attempt latency cap; the first attempt and the one tool-call retry round each get a fresh budget. Reasoning models can spend 10-20s thinking before emitting the suggestion, so the cap is generous; turn-start invalidation is the real staleness guard. |
 | `routePath` | `/api/plugins/next-prompt-suggestion` | Exact webserver route serving the live suggestion. |
 
 ## Development
