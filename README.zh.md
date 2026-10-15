@@ -80,6 +80,7 @@ bun run test   # node --test 覆盖纯逻辑模块
 - **采纳 = 直接写入草稿。** 在输入框内按 Tab 通过聚焦的 Lexical 编辑器自身输入路径（`execCommand("insertText")`）填入空草稿，修订号与撤销历史保持正确。官方 `slash/input-insert-text` 通道需要精确匹配 draft 修订号，而该修订号目前无法跨插件边界读取——待出现修订号可观察对象或按会话作用域的 emit 后切换。
 - **hanging GET 交付。** 浏览器半对 exact 路由保持一条挂起请求；建议状态变化（或 30 秒上限到期，客户端立即重新打开）的瞬间由 host 主动响应，新建议与回合失效都是即时的，无需客户端事件面。离线或 host 重启时 1.5 秒退避后恢复。
 - **快照保留有上限。** 最多 256 个会话保留请求快照（按最近最少使用淘汰），会话销毁时清除其 tracker、在途生成与挂起的响应。
+- **指令消息带生产者自有的 source kind。** V4 的持久化消息准入**拒收**已退役的 V3 写法 `{ kind: "plugin", plugin }`（报 `format v4 message requires a producer-owned source kind`——裸 `plugin` 不携带生产者身份）。指令与重试消息因此改用 `{ kind: "<插件名>", form: "notice" }`。
 - **placeholder 接管，无本地显隐状态。** 建议寄生在原生 `[data-composer-placeholder]` 节点上：React 仅在空草稿时挂载该节点，MutationObserver 用同 class 的 ghost 节点镜像它的出现/重挂并承载建议文本——输入隐藏、清空恢复全部免费获得。建议在下一个回合开始或新建议到达时失效。
 
 ## 许可

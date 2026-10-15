@@ -11,7 +11,7 @@ const request = (sessionId, overrides = {}) => ({
 	model: "deepseek-v4-flash",
 	sessionId,
 	messages: [
-		{ id: "m0", role: "system", content: [textBlock("system prompt")], source: { kind: "plugin", plugin: "prompt", form: "instructions" } },
+		{ id: "m0", role: "system", content: [textBlock("system prompt")], source: { kind: "system-prompt", form: "instructions" } },
 		{ id: "m1", role: "user", content: [textBlock("fix the failing test")], source: { kind: "user" } },
 	],
 	tools: [{ type: "function", name: "shell", parameters: { type: "object" } }],
@@ -30,7 +30,7 @@ const injectedMessage = (turn = 1) => ({
 		id: `inj-${turn}`,
 		role: "user",
 		content: [textBlock("memory head")],
-		source: { kind: "plugin", plugin: "herbin-memory", form: "snapshot" },
+		source: { kind: "herbin-memory", form: "snapshot" },
 	},
 })
 const assistantMessage = (turn, step, blocks) => ({

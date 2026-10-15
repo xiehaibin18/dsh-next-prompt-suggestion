@@ -10,7 +10,7 @@ const snapshot = {
 	temperature: 0.7,
 	tools: [{ type: "function", name: "shell", parameters: { type: "object" } }],
 	messages: [
-		{ id: "m0", role: "system", content: [{ type: "text", text: "system" }], source: { kind: "plugin", plugin: "prompt", form: "instructions" } },
+		{ id: "m0", role: "system", content: [{ type: "text", text: "system" }], source: { kind: "system-prompt", form: "instructions" } },
 		{ id: "m1", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } },
 	],
 }
@@ -36,10 +36,26 @@ test("buildReplayRequest appends the assistant and the instruction message", () 
 	assert.equal(request.messages[snapshot.messages.length], assistant)
 	const instruction = request.messages[request.messages.length - 1]
 	assert.equal(instruction.role, "user")
-	assert.equal(instruction.source.kind, "plugin")
-	assert.equal(instruction.source.plugin, "my-plugin")
+	// Producer-owned kind: the retired V3 `{kind: "plugin", plugin}` spelling is
+	// refused by V4 durable admission, so the plugin name itself is the kind.
+	assert.equal(instruction.source.kind, "my-plugin")
+	assert.equal(instruction.source.plugin, undefined)
 	assert.equal(instruction.source.form, "notice")
 	assert.deepEqual(instruction.content, [{ type: "text", text: "INSTRUCTION" }])
+})
+
+test("buildReplayRequest never emits a retired plugin source kind", () => {
+	for (const pluginName of ["my-plugin", "dsh-next-prompt-suggestion"]) {
+		for (const request of [
+			buildReplayRequest({ snapshot, assistant, instruction: "I", pluginName }),
+			buildRetryRequest({ snapshot, assistant, instruction: "I", pluginName }),
+		]) {
+			const source = request.messages[request.messages.length - 1].source
+			assert.notEqual(source.kind, "plugin")
+			assert.notEqual(source.kind, "")
+			assert.equal(typeof source.kind, "string")
+		}
+	}
 })
 
 test("buildReplayRequest mints a fresh instruction message id per call", () => {
