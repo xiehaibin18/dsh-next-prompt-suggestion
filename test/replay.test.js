@@ -106,40 +106,16 @@ test("stream reducer takes the authoritative block from block-end", () => {
 	assert.deepEqual(reducer.toolCalls, [{ id: "call-1", name: "grep", arguments: '{"pattern":"x"}' }])
 })
 
-test("buildRetryRequest answers complete tool calls with the rejection notice", () => {
+test("buildRetryRequest reuses the replay shape with a rejection notice", () => {
 	const request = buildRetryRequest({
 		snapshot,
 		assistant,
 		instruction: "INSTRUCTION",
 		pluginName: "p",
-		toolCalls: [{ id: "call-1", name: "shell", arguments: '{"cmd":"ls"}' }],
 	})
 	assert.equal(request.provider, snapshot.provider)
 	assert.deepEqual(request.tools, snapshot.tools)
-	// messages: snapshot + assistant + instruction + assistant(tool-call) + tool-result
-	assert.equal(request.messages.length, snapshot.messages.length + 4)
-	const attempted = request.messages[snapshot.messages.length + 2]
-	assert.equal(attempted.role, "assistant")
-	assert.equal(attempted.content[0].type, "tool-call")
-	assert.equal(attempted.content[0].name, "shell")
-	const rejection = request.messages[snapshot.messages.length + 3]
-	assert.equal(rejection.role, "user")
-	assert.equal(rejection.source.kind, "tool")
-	assert.equal(rejection.source.callId, "call-1")
-	assert.equal(rejection.content[0].type, "tool-result")
-	assert.equal(rejection.content[0].toolCallId, "call-1")
-	assert.equal(rejection.content[0].isError, true)
-	assert.equal(rejection.content[0].content[0].text, TOOL_REJECTION_NOTICE)
-})
-
-test("buildRetryRequest falls back to the instruction notice without complete calls", () => {
-	const request = buildRetryRequest({
-		snapshot,
-		assistant,
-		instruction: "INSTRUCTION",
-		pluginName: "p",
-		toolCalls: [{ id: "call-1", name: "", arguments: "{" }],
-	})
+	// Same shape as the plain replay: no fabricated assistant turn.
 	assert.equal(request.messages.length, snapshot.messages.length + 2)
 	const instruction = request.messages[request.messages.length - 1]
 	assert.equal(instruction.role, "user")
@@ -171,40 +147,4 @@ test("stream reducer reports sawFinish and the chunk tally", () => {
 	reducer.push({ type: "finish" })
 	assert.equal(reducer.sawFinish, true)
 	assert.equal(reducer.chunkTypes, "block-start:1,text-delta:1,finish:1")
-})
-
-test("stream reducer accumulates reasoning text", () => {
-	const reducer = createStreamReducer()
-	reducer.push({ type: "reasoning-delta", index: 0, text: "thinking " })
-	reducer.push({ type: "reasoning-delta", index: 0, text: "hard" })
-	assert.equal(reducer.reasoning, "thinking hard")
-})
-
-test("buildRetryRequest carries the rejected attempt's reasoning", () => {
-	const request = buildRetryRequest({
-		snapshot,
-		assistant,
-		instruction: "INSTRUCTION",
-		pluginName: "p",
-		toolCalls: [{ id: "call-1", name: "shell", arguments: '{"cmd":"ls"}' }],
-		reasoning: "I should inspect the repo first.",
-	})
-	const attempted = request.messages[snapshot.messages.length + 2]
-	assert.equal(attempted.content[0].type, "reasoning")
-	assert.equal(attempted.content[0].text, "I should inspect the repo first.")
-	assert.equal(attempted.content[1].type, "tool-call")
-})
-
-test("buildRetryRequest omits an empty reasoning block", () => {
-	const request = buildRetryRequest({
-		snapshot,
-		assistant,
-		instruction: "INSTRUCTION",
-		pluginName: "p",
-		toolCalls: [{ id: "call-1", name: "shell", arguments: "{}" }],
-		reasoning: "",
-	})
-	const attempted = request.messages[snapshot.messages.length + 2]
-	assert.equal(attempted.content.length, 1)
-	assert.equal(attempted.content[0].type, "tool-call")
 })
