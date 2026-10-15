@@ -20,7 +20,7 @@ ctx.llm.stream() ─► 重放 [...捕获的 messages, 最终 assistant, <指令
         │
 exact 路由 GET /api/plugins/next-prompt-suggestion?session=<id>
         │
-浏览器半 ─► placeholder 接管：镜像原生 placeholder 的 ghost 节点（挂载期间轮询）
+浏览器半 ─► placeholder 接管：镜像原生 placeholder 的 ghost 节点（hanging GET，即时）
 ```
 
 失效是结构性的：每个 `turn/start` 都会中止进行中的重放并丢弃上一条建议，建议不可能活过它所属的回合。重放不携带 `purpose`、绝不重试；任何工具调用增量都会整条丢弃建议。
@@ -78,7 +78,7 @@ bun run test   # node --test 覆盖纯逻辑模块
 ## 已知限制（v0）
 
 - **采纳 = 直接写入草稿。** 在输入框内按 Tab 通过聚焦的 Lexical 编辑器自身输入路径（`execCommand("insertText")`）填入空草稿，修订号与撤销历史保持正确。官方 `slash/input-insert-text` 通道需要精确匹配 draft 修订号，而该修订号目前无法跨插件边界读取——待出现修订号可观察对象或按会话作用域的 emit 后切换。
-- **轮询式交付。** 浏览器半挂载期间每 4 秒轮询 exact 路由，而非接收推送；host 状态是权威数据源，重连行为天然正确。
+- **hanging GET 交付。** 浏览器半对 exact 路由保持一条挂起请求；建议状态变化（或 30 秒上限到期，客户端立即重新打开）的瞬间由 host 主动响应，新建议与回合失效都是即时的，无需客户端事件面。离线或 host 重启时 1.5 秒退避后恢复。
 - **placeholder 接管，无本地显隐状态。** 建议寄生在原生 `[data-composer-placeholder]` 节点上：React 仅在空草稿时挂载该节点，MutationObserver 用同 class 的 ghost 节点镜像它的出现/重挂并承载建议文本——输入隐藏、清空恢复全部免费获得。建议在下一个回合开始或新建议到达时失效。
 
 ## 许可

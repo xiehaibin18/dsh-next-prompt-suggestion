@@ -20,7 +20,7 @@ normalize ─► single line, ≤ max chars, quotes stripped, silent-on-doubt
         │
 exact route GET /api/plugins/next-prompt-suggestion?session=<id>
         │
-browser half ─► placeholder takeover: ghost node mirroring the native placeholder (polls while mounted)
+browser half ─► placeholder takeover: ghost node mirroring the native placeholder (hanging GET, instant)
 ```
 
 Invalidation is structural: every `turn/start` aborts any in-flight replay and drops the previous suggestion, so a suggestion can never outlive the turn it belongs to. The replay carries no `purpose` (it is an ordinary call through `ctx.llm.stream`), never retries, and any tool-call delta rejects the whole suggestion.
@@ -78,7 +78,7 @@ bun run test   # node --test over the pure modules
 ## Known limitations (v0)
 
 - **Accept = direct DOM fill.** Tab inside the composer fills the empty draft through the focused Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
-- **Poll-based delivery.** The browser half polls the exact route every 4s while mounted instead of receiving a push; reconnect behavior is naturally correct because the host state is authoritative.
+- **Hanging-GET delivery.** The browser half keeps one hanging request open against the exact route; the host resolves it the moment the suggestion state changes (or after a 30s cap, which the client immediately re-opens), so a new suggestion and turn-start invalidation arrive instantly without a client-side event surface. Offline or host restart backs off 1.5s and resumes.
 - **Placeholder takeover, no local visibility state.** The suggestion rides the native `[data-composer-placeholder]` node: React mounts that node only for an empty draft, and a MutationObserver mirrors its (re)appearance with a same-class ghost carrying the suggestion text — typing hides, clearing restores, all for free. The suggestion disappears when the next turn starts or a newer one replaces it.
 
 ## License

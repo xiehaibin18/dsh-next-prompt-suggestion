@@ -148,3 +148,31 @@ test("assistant settlements from another turn are ignored", () => {
 	assert.equal(action.type, "generate")
 	assert.equal(action.assistant.id, "a-1-1")
 })
+
+test("turn/start bumps the version and notifies only when a suggestion was live", () => {
+	const tracker = new SuggestionTracker()
+	const versions = []
+	tracker.onChange = (version) => versions.push(version)
+	tracker.onSessionEvent(turnStart(1))
+	assert.equal(tracker.version, 0)
+	assert.deepEqual(versions, [])
+	tracker.setSuggestion({ text: "hi", turn: 1, anchorMessageId: "a-1-1", createdAt: 1 })
+	assert.equal(tracker.version, 1)
+	assert.deepEqual(versions, [1])
+	tracker.onSessionEvent(turnStart(2))
+	assert.equal(tracker.version, 2)
+	assert.deepEqual(versions, [1, 2])
+})
+
+test("setSuggestion notifies on change and stays quiet on identical text", () => {
+	const tracker = new SuggestionTracker()
+	const versions = []
+	tracker.onChange = (version) => versions.push(version)
+	tracker.setSuggestion({ text: "run tests", turn: 1, anchorMessageId: "a-1-1", createdAt: 1 })
+	assert.deepEqual(versions, [1])
+	// Same text (e.g. re-set): no visible change, no notification.
+	tracker.setSuggestion({ text: "run tests", turn: 1, anchorMessageId: "a-1-1", createdAt: 2 })
+	assert.deepEqual(versions, [1])
+	tracker.setSuggestion({ text: "ship it", turn: 1, anchorMessageId: "a-1-1", createdAt: 3 })
+	assert.deepEqual(versions, [1, 2])
+})
