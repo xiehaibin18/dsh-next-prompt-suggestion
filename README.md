@@ -16,7 +16,7 @@ session/event turn/end ─► gate: completed human turn, final assistant has no
 ctx.llm.stream() ─► replay [...captured messages, final assistant, <instruction>]
         │                same provider/model/tools → upstream prompt cache hits
         │
-normalize ─► single line, ≤ max chars, quotes stripped, silent-on-doubt
+normalize ─► single line, ≤ max chars, quotes stripped, assistant-voice and lead-ins rejected, silent-on-doubt
         │
 exact route GET /api/plugins/next-prompt-suggestion?session=<id>
         │
@@ -56,7 +56,7 @@ All keys are optional; the exported Config schema owns the defaults.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `enabled` | `true` | Master switch for capture, generation, and the route. |
-| `maxSuggestionChars` | `200` | Hard cap on the accepted suggestion length. |
+| `maxSuggestionChars` | `80` | Hard cap on the accepted suggestion length (2-12 words / 4-24 CJK characters fit comfortably). |
 | `latencyCapMs` | `0` (disabled) | Optional per-attempt latency cap, kept as an escape hatch against a genuinely runaway provider. Disabled by default: invalidation-driven abort is the real staleness guard (a new turn aborts the generation and clears the suggestion), and an unfinished generation has no user-visible consequence - a tight cap only silently kills suggestions on slow reasoning models. |
 | `routePath` | `/api/plugins/next-prompt-suggestion` | Exact webserver route serving the live suggestion. |
 
@@ -78,6 +78,7 @@ bun run test   # node --test over the pure modules
 ## Known limitations (v0)
 
 - **Accept = direct DOM fill.** Tab inside the composer fills the empty draft through the focused Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
+- **Suggestions are validated as user voice.** Besides single-line/length/quote rules, a reply that narrates assistant work (`Let me…`, `I'll…`, `我先…`, `先取证`) or opens a lead-in (trailing `:` / `…`) is rejected: a live run once accepted the model's own commentary about the instruction as a suggestion.
 - **Upstream streams are validated.** An attempt only counts as completed when the terminal `finish` chunk arrives (a truncated or empty upstream stream logs `incomplete` with its chunk tally), and text is taken from deltas or a delta-less `block-end` block, never both.
 - **No fixed generation timeout.** A replay runs until it finishes or a turn invalidates it; reasoning models can take 10-20s to emit the suggestion. `latencyCapMs` exists but defaults to disabled.
 - **Hanging-GET delivery.** The browser half keeps one hanging request open against the exact route; the host resolves it the moment the suggestion state changes (or after a 30s cap, which the client immediately re-opens), so a new suggestion and turn-start invalidation arrive instantly without a client-side event surface. Offline or host restart backs off 1.5s and resumes.

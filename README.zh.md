@@ -16,7 +16,7 @@ session/event turn/end ─► 门闩：completed 的人类回合，最终 assist
 ctx.llm.stream() ─► 重放 [...捕获的 messages, 最终 assistant, <指令>]
         │                同 provider/model/tools → 命中上游 prompt 缓存
         │
-归一化 ─► 单行、≤ 最大字符数、剥引号、不确定则沉默
+归一化 ─► 单行、≤ 最大字符数、剥引号、拒绝助手口吻与话引子、不确定则沉默
         │
 exact 路由 GET /api/plugins/next-prompt-suggestion?session=<id>
         │
@@ -56,7 +56,7 @@ exact 路由 GET /api/plugins/next-prompt-suggestion?session=<id>
 | 键 | 默认值 | 含义 |
 | --- | --- | --- |
 | `enabled` | `true` | 捕获、生成与路由的总开关。 |
-| `maxSuggestionChars` | `200` | 接受的建议长度硬上限。 |
+| `maxSuggestionChars` | `80` | 接受的建议长度硬上限（2-12 个英文词 / 4-24 个汉字绰绰有余）。 |
 | `latencyCapMs` | `0`（关闭） | 可选的单次尝试延迟上限，仅作为对付真正失控 provider 的逃生阀。默认关闭：真正的过期防护是失效驱动（新回合会中止生成并清掉建议），未完成的生成没有用户可见后果——过紧的上限只会静默掐掉慢推理模型上的建议。 |
 | `routePath` | `/api/plugins/next-prompt-suggestion` | 提供实时建议的 exact 路由。 |
 
@@ -79,6 +79,7 @@ bun run test   # node --test 覆盖纯逻辑模块
 
 - **采纳 = 直接写入草稿。** 在输入框内按 Tab 通过聚焦的 Lexical 编辑器自身输入路径（`execCommand("insertText")`）填入空草稿，修订号与撤销历史保持正确。官方 `slash/input-insert-text` 通道需要精确匹配 draft 修订号，而该修订号目前无法跨插件边界读取——待出现修订号可观察对象或按会话作用域的 emit 后切换。
 - **hanging GET 交付。** 浏览器半对 exact 路由保持一条挂起请求；建议状态变化（或 30 秒上限到期，客户端立即重新打开）的瞬间由 host 主动响应，新建议与回合失效都是即时的，无需客户端事件面。离线或 host 重启时 1.5 秒退避后恢复。
+- **建议必须是用户口吻。** 除单行/长度/引号规则外，叙述助手动作（`Let me…`、`我先…`、`先取证`）或以话引子结尾（末尾 `:` / `…`）的回复一律拒绝：曾有一次实跑把模型对指令本身的评论当成了建议。
 - **placeholder 接管，无本地显隐状态。** 建议寄生在原生 `[data-composer-placeholder]` 节点上：React 仅在空草稿时挂载该节点，MutationObserver 用同 class 的 ghost 节点镜像它的出现/重挂并承载建议文本——输入隐藏、清空恢复全部免费获得。建议在下一个回合开始或新建议到达时失效。
 
 ## 许可
