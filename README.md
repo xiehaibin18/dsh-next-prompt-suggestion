@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Next-prompt suggestion for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): after a successful human turn, the plugin replays the session's last model request verbatim with one appended suggestion-mode instruction, predicts what the user might naturally type next, and shows it as a subtle pill above the composer. Click the pill to copy the suggestion, paste, and send.
+Next-prompt suggestion for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): after a successful human turn, the plugin replays the session's last model request verbatim with one appended suggestion-mode instruction, predicts what the user might naturally type next, and shows it as a subtle pill above the composer. Press Tab inside the composer (or click the pill) to fill the suggestion into an empty draft; clicking with a non-empty draft copies it instead.
 
 Ported from the proven [Mentat next-prompt suggestion](https://github.com/Herbin-s/mentat/pull/199) design, rebuilt on DSH's Cordis extension points.
 
@@ -77,7 +77,7 @@ bun run test   # node --test over the pure modules
 
 ## Known limitations (v0)
 
-- **Accept = clipboard copy.** Clicking the pill copies the suggestion; pasting into the composer is manual. Direct draft insertion through the `slash/input-insert-text` pipeline and ghost-text rendering with Tab-to-accept are the next iterations (the draft-revision guard and per-session event scoping need in-repo verification against a running web client).
+- **Accept = direct DOM fill.** Tab inside the composer (or a click) fills an empty draft through the focused Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct; a non-empty draft falls back to clipboard copy. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
 - **Poll-based delivery.** The browser half polls the exact route every 4s while mounted instead of receiving a push; reconnect behavior is naturally correct because the host state is authoritative.
 - **Anchor invalidation is turn-level.** A suggestion survives minor draft edits (it is a pill, not ghost text), and disappears when the next turn starts or a newer suggestion replaces it.
 

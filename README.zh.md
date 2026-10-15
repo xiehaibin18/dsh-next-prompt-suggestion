@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的下一句输入建议插件：一次成功的人类回合结束后，原样重放该会话最后一次普通模型请求并追加一条 suggestion 指令，预测用户下一句最可能输入的内容，在输入框上方以胶囊形式展示。点击胶囊复制建议，粘贴即可发送。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的下一句输入建议插件：一次成功的人类回合结束后，原样重放该会话最后一次普通模型请求并追加一条 suggestion 指令，预测用户下一句最可能输入的内容，在输入框上方以悬浮胶囊展示。在输入框内按 Tab（或点击胶囊）即可把建议填入草稿，草稿非空时点击则复制到剪贴板。
 
 设计移植自已验证的 [Mentat 下一句输入建议](https://github.com/Herbin-s/mentat/pull/199)，基于 DSH 的 Cordis 扩展点重建。
 
@@ -77,7 +77,7 @@ bun run test   # node --test 覆盖纯逻辑模块
 
 ## 已知限制（v0）
 
-- **采纳 = 复制到剪贴板。** 点击胶囊复制建议，需手动粘贴到输入框。下一步迭代是通过 `slash/input-insert-text` 管线直接写入草稿、以及 ghost text + Tab 采纳（draft 修订守卫与按会话的事件作用域需要在运行中的 web 客户端上做仓库内验证）。
+- **采纳 = 直接写入草稿。** 在输入框内按 Tab（或点击胶囊）通过聚焦的 Lexical 编辑器自身输入路径（`execCommand("insertText")`）填入空草稿，修订号与撤销历史保持正确；草稿非空时降级为复制到剪贴板。官方 `slash/input-insert-text` 通道需要精确匹配 draft 修订号，而该修订号目前无法跨插件边界读取——待出现修订号可观察对象或按会话作用域的 emit 后切换。
 - **轮询式交付。** 浏览器半挂载期间每 4 秒轮询 exact 路由，而非接收推送；host 状态是权威数据源，重连行为天然正确。
 - **锚点失效是回合级。** 建议在草稿编辑期间保留（它是胶囊而非 ghost text），下一个回合开始或新建议到达时消失。
 
