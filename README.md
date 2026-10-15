@@ -57,7 +57,7 @@ All keys are optional; the exported Config schema owns the defaults.
 | --- | --- | --- |
 | `enabled` | `true` | Master switch for capture, generation, and the route. |
 | `maxSuggestionChars` | `200` | Hard cap on the accepted suggestion length. |
-| `latencyCapMs` | `30000` | Per-attempt latency cap; the first attempt and the one tool-call retry round each get a fresh budget. Reasoning models can spend 10-20s thinking before emitting the suggestion, so the cap is generous; turn-start invalidation is the real staleness guard. |
+| `latencyCapMs` | `0` (disabled) | Optional per-attempt latency cap, kept as an escape hatch against a genuinely runaway provider. Disabled by default: invalidation-driven abort is the real staleness guard (a new turn aborts the generation and clears the suggestion), and an unfinished generation has no user-visible consequence - a tight cap only silently kills suggestions on slow reasoning models. |
 | `routePath` | `/api/plugins/next-prompt-suggestion` | Exact webserver route serving the live suggestion. |
 
 ## Development
@@ -78,6 +78,7 @@ bun run test   # node --test over the pure modules
 ## Known limitations (v0)
 
 - **Accept = direct DOM fill.** Tab inside the composer fills the empty draft through the focused Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
+- **No fixed generation timeout.** A replay runs until it finishes or a turn invalidates it; reasoning models can take 10-20s to emit the suggestion. `latencyCapMs` exists but defaults to disabled.
 - **Hanging-GET delivery.** The browser half keeps one hanging request open against the exact route; the host resolves it the moment the suggestion state changes (or after a 30s cap, which the client immediately re-opens), so a new suggestion and turn-start invalidation arrive instantly without a client-side event surface. Offline or host restart backs off 1.5s and resumes.
 - **Placeholder takeover, no local visibility state.** The suggestion rides the native `[data-composer-placeholder]` node: React mounts that node only for an empty draft, and a MutationObserver mirrors its (re)appearance with a same-class ghost carrying the suggestion text — typing hides, clearing restores, all for free. The suggestion disappears when the next turn starts or a newer one replaces it.
 
