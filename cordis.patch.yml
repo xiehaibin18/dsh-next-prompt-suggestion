@@ -1,0 +1,8 @@
+# The dsh-next-prompt-suggestion bundle patch: mounts the plugin as a
+# host-plane row so every session gets suggestion capture and generation.
+# The exported Config schema supplies all defaults, so no config is restated
+# here; a deployment overrides keys in a later patch layer (profile
+# cordis.patch.yml or --patch) by restating the keys it owns.
+- insert:
+    - id: next-prompt-suggestion
+      name: dsh-next-prompt-suggestion
