@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Next-prompt suggestion for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): after a successful human turn, the plugin replays the session's last model request verbatim with one appended suggestion-mode instruction, predicts what the user might naturally type next, and shows it as the composer's placeholder - the same shape as the original Mentat feature. The suggestion appears only while the draft is empty (native placeholder semantics), and Tab inside the composer fills it into the draft.
+Next-prompt suggestion for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): after a successful human turn, the plugin replays the session's last model request verbatim with one appended suggestion-mode instruction, predicts what the user might naturally type next, and shows it as the composer's placeholder - the same shape as the original Mentat feature. The suggestion appears only while the draft is empty (native placeholder semantics), and Tab in the focused editor fills it into the draft.
 
 Ported from the proven [Mentat next-prompt suggestion](https://github.com/Herbin-s/mentat/pull/199) design, rebuilt on DSH's Cordis extension points.
 
@@ -80,7 +80,7 @@ bun run test   # node --test, including production apply(ctx, config) behavior t
 
 ## Known limitations (v0)
 
-- **Accept = direct DOM fill.** Tab inside the composer fills the empty draft through the focused Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
+- **Accept = direct DOM fill.** Tab in the focused editor fills the empty draft through the Lexical editor's own input path (`execCommand("insertText")`), so revisions and undo history stay correct. The suggestion must still be showing for this composer; toolbar focus and open menus keep normal navigation. The sanctioned `slash/input-insert-text` channel needs an exact draft-revision match that is not readable across the plugin boundary yet — switching to it is a future iteration once a revision-observable or session-scoped emit exists.
 - **Upstream streams are validated.** An attempt only counts as completed when its terminal `finish` reason is `stop`; every other finish is a failure, and a stream without `finish` is `incomplete`. Text is taken from deltas or a delta-less `block-end` block, never both.
 - **Snapshot retention is bounded.** At most 256 sessions keep a captured request snapshot (least recently used evicted). Session or plugin disposal drops trackers, aborts every attempt, clears timers, and resolves held responses.
 - **Subagent turns are excluded.** DSH child sessions carry subagent origin and delegation depth in their headers while their task messages still use `kind: "user"`; the plugin filters those sessions before capture/generation. Top-level conversations, including forks that only share a parent lineage, remain eligible.
