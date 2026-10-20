@@ -51,24 +51,42 @@ test("captureRequest keeps ordinary conversation requests", () => {
 	assert.equal(tracker.snapshot.messages.length, 2)
 })
 
-test("captureRequest skips auxiliary purposes and session-less calls", () => {
+test("captureRequest skips session-less calls and preserves the complete request", () => {
 	const tracker = new SuggestionTracker()
-	tracker.captureRequest(request("s1", { purpose: "session-title" }))
-	tracker.captureRequest(request("s1", { purpose: "compaction" }))
 	const { sessionId, ...withoutSession } = request("s1")
 	void sessionId
 	tracker.captureRequest(withoutSession)
 	assert.equal(tracker.snapshot, null)
+	tracker.captureRequest(
+		request("s1", {
+			toolHistory: [{ kind: "tool", name: "shell", loadedAt: 1 }],
+			maxTokens: 321,
+			stop: ["END"],
+		}),
+	)
+	assert.equal(tracker.snapshot.sessionId, "s1")
+	assert.deepEqual(tracker.snapshot.toolHistory, [{ kind: "tool", name: "shell", loadedAt: 1 }])
+	assert.equal(tracker.snapshot.maxTokens, 321)
+	assert.deepEqual(tracker.snapshot.stop, ["END"])
 })
 
-test("captureRequest copies messages and tools defensively", () => {
-	const options = request("s1")
+test("captureRequest copies nested messages, tools, and request fields defensively", () => {
+	const options = request("s1", {
+		toolHistory: [{ kind: "tool", name: "shell", loadedAt: 1 }],
+		stop: ["END"],
+		signal: new AbortController().signal,
+	})
 	const tracker = new SuggestionTracker()
 	tracker.captureRequest(options)
 	options.messages.push({ id: "m2", role: "user", content: [textBlock("later")], source: { kind: "user" } })
 	options.tools.push({ type: "function", name: "extra", parameters: { type: "object" } })
+	options.toolHistory[0].loadedAt = 2
+	options.stop.push("OTHER")
 	assert.equal(tracker.snapshot.messages.length, 2)
 	assert.equal(tracker.snapshot.tools.length, 1)
+	assert.equal(tracker.snapshot.toolHistory[0].loadedAt, 1)
+	assert.deepEqual(tracker.snapshot.stop, ["END"])
+	assert.equal(Object.hasOwn(tracker.snapshot, "signal"), false)
 })
 
 test("turn/start cancels in-flight work and drops the previous suggestion", () => {

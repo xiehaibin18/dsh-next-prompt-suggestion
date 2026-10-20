@@ -6,11 +6,21 @@ import { TOOL_REJECTION_NOTICE, buildReplayRequest, buildRetryRequest, createStr
 const snapshot = {
 	provider: "deepseek-official",
 	model: "deepseek-v4-flash",
-	reasoningEffort: undefined,
+	reasoningEffort: "high",
 	temperature: 0.7,
+	system: "captured system prompt",
 	tools: [{ type: "function", name: "shell", parameters: { type: "object" } }],
+	toolHistory: [{ kind: "tool", name: "shell", loadedAt: 1 }],
+	sessionId: "session-1",
+	maxTokens: 1234,
+	stop: ["END"],
 	messages: [
-		{ id: "m0", role: "system", content: [{ type: "text", text: "system" }], source: { kind: "system-prompt", form: "instructions" } },
+		{
+			id: "m0",
+			role: "system",
+			content: [{ type: "text", text: "system" }],
+			source: { kind: "system-prompt", form: "instructions" },
+		},
 		{ id: "m1", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } },
 	],
 }
@@ -26,14 +36,20 @@ test("buildReplayRequest reuses the snapshot route verbatim", () => {
 	const request = buildReplayRequest({ snapshot, assistant, instruction: "INSTRUCTION", pluginName: "p" })
 	assert.equal(request.provider, "deepseek-official")
 	assert.equal(request.model, "deepseek-v4-flash")
+	assert.equal(request.reasoningEffort, "high")
 	assert.equal(request.temperature, 0.7)
+	assert.equal(request.system, "captured system prompt")
 	assert.deepEqual(request.tools, snapshot.tools)
+	assert.deepEqual(request.toolHistory, snapshot.toolHistory)
+	assert.equal(request.sessionId, "session-1")
+	assert.equal(request.maxTokens, 1234)
+	assert.deepEqual(request.stop, ["END"])
 })
 
 test("buildReplayRequest appends the assistant and the instruction message", () => {
 	const request = buildReplayRequest({ snapshot, assistant, instruction: "INSTRUCTION", pluginName: "my-plugin" })
 	assert.equal(request.messages.length, snapshot.messages.length + 2)
-	assert.equal(request.messages[snapshot.messages.length], assistant)
+	assert.deepEqual(request.messages[snapshot.messages.length], assistant)
 	const instruction = request.messages[request.messages.length - 1]
 	assert.equal(instruction.role, "user")
 	// Producer-owned kind: the retired V3 `{kind: "plugin", plugin}` spelling is
@@ -79,7 +95,7 @@ test("stream reducer accumulates text deltas and ends on finish", () => {
 	assert.equal(reducer.push({ type: "text-delta", index: 0, text: "tinue" }), "continue")
 	assert.equal(reducer.push({ type: "block-end", index: 0, block: { type: "text", text: "continue" } }), "continue")
 	assert.equal(reducer.text, "continue")
-	assert.equal(reducer.push({ type: "finish" }), "done")
+	assert.equal(reducer.push({ type: "finish", reason: { kind: "stop" } }), "done")
 })
 
 test("stream reducer captures usage", () => {
@@ -114,12 +130,28 @@ test("stream reducer accumulates tool calls from deltas", () => {
 test("stream reducer takes the authoritative block from block-end", () => {
 	const reducer = createStreamReducer()
 	reducer.push({ type: "tool-call-delta", index: 0, id: "call-1", argumentsDelta: "{" })
-	reducer.push({
-		type: "block-end",
-		index: 0,
-		block: { type: "tool-call", id: "call-1", name: "grep", arguments: '{"pattern":"x"}' },
-	})
+	assert.equal(
+		reducer.push({
+			type: "block-end",
+			index: 0,
+			block: { type: "tool-call", id: "call-1", name: "grep", arguments: '{"pattern":"x"}' },
+		}),
+		"tool_call",
+	)
 	assert.deepEqual(reducer.toolCalls, [{ id: "call-1", name: "grep", arguments: '{"pattern":"x"}' }])
+})
+
+test("a whole tool-call block rejects without a preceding delta", () => {
+	const reducer = createStreamReducer()
+	assert.equal(
+		reducer.push({
+			type: "block-end",
+			index: 0,
+			block: { type: "tool-call", id: "call-1", name: "shell", arguments: "{}" },
+		}),
+		"tool_call",
+	)
+	assert.deepEqual(reducer.toolCalls, [{ id: "call-1", name: "shell", arguments: "{}" }])
 })
 
 test("buildRetryRequest reuses the replay shape with a rejection notice", () => {
@@ -131,6 +163,10 @@ test("buildRetryRequest reuses the replay shape with a rejection notice", () => 
 	})
 	assert.equal(request.provider, snapshot.provider)
 	assert.deepEqual(request.tools, snapshot.tools)
+	assert.deepEqual(request.toolHistory, snapshot.toolHistory)
+	assert.equal(request.sessionId, snapshot.sessionId)
+	assert.equal(request.maxTokens, snapshot.maxTokens)
+	assert.deepEqual(request.stop, snapshot.stop)
 	// Same shape as the plain replay: no fabricated assistant turn.
 	assert.equal(request.messages.length, snapshot.messages.length + 2)
 	const instruction = request.messages[request.messages.length - 1]
@@ -141,10 +177,7 @@ test("buildRetryRequest reuses the replay shape with a rejection notice", () => 
 
 test("stream reducer falls back to block-end text when no deltas arrived", () => {
 	const reducer = createStreamReducer()
-	assert.equal(
-		reducer.push({ type: "block-end", index: 0, block: { type: "text", text: "whole block" } }),
-		"continue",
-	)
+	assert.equal(reducer.push({ type: "block-end", index: 0, block: { type: "text", text: "whole block" } }), "continue")
 	assert.equal(reducer.text, "whole block")
 })
 
@@ -160,7 +193,61 @@ test("stream reducer reports sawFinish and the chunk tally", () => {
 	assert.equal(reducer.sawFinish, false)
 	reducer.push({ type: "block-start", index: 0, blockType: "text" })
 	reducer.push({ type: "text-delta", index: 0, text: "x" })
-	reducer.push({ type: "finish" })
+	reducer.push({ type: "finish", reason: { kind: "stop" } })
 	assert.equal(reducer.sawFinish, true)
 	assert.equal(reducer.chunkTypes, "block-start:1,text-delta:1,finish:1")
+})
+
+test("only stop is an adoptable finish", () => {
+	for (const kind of ["stop", "tool-calls", "max-tokens", "aborted", "error", "future-reason"]) {
+		const reducer = createStreamReducer()
+		const outcome = reducer.push({ type: "finish", reason: { kind } })
+		assert.equal(outcome, kind === "stop" ? "done" : kind === "tool-calls" ? "tool_call" : "failed")
+		assert.equal(reducer.finishKind, kind === "future-reason" ? "unknown" : kind)
+		if (kind === "aborted" || kind === "error") {
+			assert.equal(reducer.finishFailureCode, "unknown")
+		} else {
+			assert.equal(reducer.finishFailureCode, null)
+		}
+	}
+	const missingReason = createStreamReducer()
+	assert.equal(missingReason.push({ type: "finish" }), "failed")
+	assert.equal(missingReason.finishKind, "unknown")
+})
+
+test("finish failures retain only a bounded structured code", () => {
+	const safe = createStreamReducer()
+	assert.equal(
+		safe.push({
+			type: "finish",
+			reason: {
+				kind: "error",
+				failure: { code: "UPSTREAM_TIMEOUT", message: "raw provider payload" },
+			},
+		}),
+		"failed",
+	)
+	assert.equal(safe.finishFailureCode, "UPSTREAM_TIMEOUT")
+
+	const unsafe = createStreamReducer()
+	unsafe.push({
+		type: "finish",
+		reason: {
+			kind: "error",
+			failure: { code: `unsafe ${"x".repeat(100)}`, message: "raw provider payload" },
+		},
+	})
+	assert.equal(unsafe.finishFailureCode, "unknown")
+})
+
+test("replay requests detach every captured field and the assistant", () => {
+	const request = buildReplayRequest({ snapshot, assistant, instruction: "I", pluginName: "p" })
+	request.toolHistory[0].loadedAt = 2
+	request.stop.push("OTHER")
+	request.messages[0].content[0].text = "changed"
+	request.messages[snapshot.messages.length].content[0].text = "changed assistant"
+	assert.equal(snapshot.toolHistory[0].loadedAt, 1)
+	assert.deepEqual(snapshot.stop, ["END"])
+	assert.equal(snapshot.messages[0].content[0].text, "system")
+	assert.equal(assistant.content[0].text, "hello back")
 })

@@ -1,6 +1,6 @@
 {
 	"name": "dsh-next-prompt-suggestion",
-	"description": "Next-prompt suggestion for DeepSeek Harness: replays the session's last model request after a human turn and offers the predicted next user input as a composer suggestion pill",
+	"description": "Next-prompt suggestion for DeepSeek Harness: replays the session's last model request after a human turn and offers the predicted next user input in the empty composer placeholder",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
