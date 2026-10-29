@@ -451,20 +451,18 @@ test("client apply skips registration when the plugin is disabled", () => {
 	assert.equal(injectCalls, 0)
 })
 
-test("a failed status probe clears the shown suggestion until the next success", async () => {
-	const dom = createComposerDom({ current: null, placeholder: true })
-	// Park retry timers instead of firing them: the test drives the loop's
-	// turns directly and must not leave real timers behind.
-	const parkedTimers = []
+const mountProductionSuggestion = async ({ dom, parkedTimers, server, fetchCalls }) => {
 	const { registrations } = loadClientBundle({
 		document: dom.document,
 		MutationObserver: dom.MutationObserver,
+		URLSearchParams,
 		setTimeout: (callback) => {
 			parkedTimers.push(callback)
 			return parkedTimers.length
 		},
-		fetch: async () => {
-			throw new Error("fetch must not run in this fixture")
+		fetch: async (url) => {
+			fetchCalls.push(String(url))
+			return server.respond(String(url))
 		},
 	})
 	const harness = createDynamicReactHarness(dom.document, dom.overlay)
@@ -473,54 +471,144 @@ test("a failed status probe clears the shown suggestion until the next success",
 		throw new Error(`unexpected client dependency: ${specifier}`)
 	})
 	let component = null
+	let entry = null
 	const ctx = {
 		slots: {
 			inject: (_slotName, register) => register(),
-			register: (_entry, registeredComponent) => {
+			register: (registeredEntry, registeredComponent) => {
+				entry = registeredEntry
 				component = registeredComponent
-				return _entry
+				return registeredEntry
 			},
 		},
 	}
 	exports.apply(ctx, {})
+	const suggestionFace = entry.inject("session-1").suggestion
+	harness.mount(component, { suggestion: suggestionFace })
+	return { harness, flushRetry: () => parkedTimers.shift()?.() }
+}
 
-	let loadCalls = 0
-	let rejectSecondLoad = null
-	const loads = [
-		() => Promise.resolve({ suggestion: { text: "run the tests" }, v: 1 }),
-		// Park the probe the way a hanging GET would, so the shown state can
-		// be asserted before the failure lands.
-		() =>
-			new Promise((_resolve, reject) => {
-				rejectSecondLoad = () => reject(new Error("suggestion route HTTP 404"))
-			}),
-		() => Promise.resolve({ suggestion: null, v: 2 }),
-	]
-	const suggestionFace = {
-		sessionId: "session-1",
-		load: async () => {
-			const make = loads[Math.min(loadCalls, loads.length - 1)]
-			loadCalls += 1
-			return make()
+const settleAll = async () => {
+	for (let index = 0; index < 6; index += 1) await settle()
+}
+
+test("a failed probe clears the suggestion; the forced refresh restores it without waiting", async () => {
+	const dom = createComposerDom({ current: null, placeholder: true })
+	// Park retry timers instead of firing them: the test drives the loop's
+	// turns directly and must not leave real timers behind.
+	const parkedTimers = []
+	const fetchCalls = []
+	let pendingReject = null
+	// The server version stays constant across the outage: only the forced
+	// (version-less) recovery request can restore the suggestion promptly.
+	const server = {
+		failHangingRequest() {
+			pendingReject?.(new Error("network lost"))
+		},
+		respond(url) {
+			const knownVersion = new URL(url, "http://localhost").searchParams.get("v")
+			if (knownVersion !== null && Number(knownVersion) === 1) {
+				// Long poll: hold until the test fails the connection.
+				return new Promise((_resolve, reject) => {
+					pendingReject = reject
+				})
+			}
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({ suggestion: { text: "run the tests" }, v: 1 }),
+			}
 		},
 	}
-	harness.mount(component, { suggestion: suggestionFace })
+	const { harness, flushRetry } = await mountProductionSuggestion({ dom, parkedTimers, server, fetchCalls })
 
 	const ghost = () => dom.card.querySelector('[data-next-prompt-suggestion-ghost="true"]')
-	for (let index = 0; index < 4; index += 1) await settle()
+	await settleAll()
 	dom.mutations()
 	assert.notEqual(ghost(), null)
 	assert.equal(ghost().textContent, "run the tests")
-	assert.equal(loadCalls, 2)
+	assert.equal(fetchCalls.length, 2)
+	assert.ok(fetchCalls[0].includes("v=0"))
+	assert.ok(fetchCalls[1].includes("v=1"))
 
-	// The parked probe rejects, so the previously shown suggestion must be
-	// dropped instead of surviving into the next loop turn.
-	rejectSecondLoad()
-	for (let index = 0; index < 4; index += 1) await settle()
+	// The hanging probe fails; the previously shown suggestion must be
+	// dropped instead of surviving the outage.
+	server.failHangingRequest()
+	await settleAll()
 	assert.equal(ghost(), null)
-	const event = tabEvent(dom)
+	let event = tabEvent(dom)
 	assert.equal(event.defaultPrevented, false)
 	assert.equal(dom.execCalls.length, 0)
+
+	// The forced (version-less) recovery request restores the unchanged
+	// suggestion immediately instead of hanging on the known version.
+	assert.equal(parkedTimers.length, 1)
+	flushRetry()
+	await settleAll()
+	// The recovery request carries no version, and the loop immediately
+	// re-opens the versioned long poll afterwards.
+	assert.equal(fetchCalls.length, 4)
+	assert.equal(new URL(fetchCalls[2], "http://localhost").searchParams.has("v"), false)
+	assert.notEqual(ghost(), null)
+	assert.equal(ghost().textContent, "run the tests")
+	event = tabEvent(dom)
+	assert.equal(event.defaultPrevented, true)
+	assert.deepEqual(dom.execCalls, [{ command: "insertText", text: "run the tests" }])
+	assert.ok(fetchCalls[3].includes("v=1"))
+
+	harness.unmount()
+})
+
+test("after a host restart resets the version to zero, recovery never hangs on v=0", async () => {
+	const dom = createComposerDom({ current: null, placeholder: true })
+	const parkedTimers = []
+	const fetchCalls = []
+	let pendingReject = null
+	let serverState = { text: "before restart" }
+	let serverVersion = 5
+	const server = {
+		failHangingRequest() {
+			pendingReject?.(new Error("network lost"))
+		},
+		restart() {
+			serverState = { text: "fresh after restart" }
+			serverVersion = 0
+		},
+		respond(url) {
+			const knownVersion = new URL(url, "http://localhost").searchParams.get("v")
+			if (knownVersion !== null && Number(knownVersion) === serverVersion) {
+				return new Promise((_resolve, reject) => {
+					pendingReject = reject
+				})
+			}
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({ suggestion: { text: serverState.text }, v: serverVersion }),
+			}
+		},
+	}
+	const { harness, flushRetry } = await mountProductionSuggestion({ dom, parkedTimers, server, fetchCalls })
+
+	const ghost = () => dom.card.querySelector('[data-next-prompt-suggestion-ghost="true"]')
+	await settleAll()
+	assert.notEqual(ghost(), null)
+	assert.ok(fetchCalls[1].includes("v=5"))
+
+	server.failHangingRequest()
+	await settleAll()
+	assert.equal(ghost(), null)
+
+	// A restarted host may expose exactly version 0; resetting the client's
+	// version to 0 instead of forcing a full snapshot would hang here.
+	server.restart()
+	assert.equal(parkedTimers.length, 1)
+	flushRetry()
+	await settleAll()
+	assert.equal(new URL(fetchCalls[2], "http://localhost").searchParams.has("v"), false)
+	assert.notEqual(ghost(), null)
+	assert.equal(ghost().textContent, "fresh after restart")
+	assert.ok(fetchCalls[3].includes("v=0"))
 
 	harness.unmount()
 })

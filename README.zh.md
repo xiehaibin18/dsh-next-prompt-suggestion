@@ -84,7 +84,7 @@ bun run test   # node --test，包含生产入口 apply(ctx, config) 行为测�
 
 - **采纳 = 直接写入草稿。** 编辑区获得焦点时按 Tab，通过 Lexical 编辑器自身输入路径（`execCommand("insertText")`）填入空草稿，修订号与撤销历史保持正确。该输入框的建议必须仍在显示；工具栏获得焦点或菜单打开时保留正常导航。官方 `slash/input-insert-text` 通道需要精确匹配 draft 修订号，而该修订号目前无法跨插件边界读取——待出现修订号可观察对象或按会话作用域的 emit 后切换。
 - **上游流会校验结束原因。** 只有 terminal `finish` 的 `reason.kind` 为 `stop` 才视为完成；其他 finish 一律失败，没有 finish 的流记为 `incomplete`。文本来自 deltas 或没有 deltas 时的整个 `block-end` block，任选其一。
-- **hanging GET 交付。** 浏览器半对 exact 路由保持一条挂起请求；建议状态变化（或 30 秒上限到期，客户端立即重新打开）的瞬间由 host 主动响应，新建议与回合失效都是即时的，无需客户端事件面。一次失败的状态探测（host 重启、会话淘汰、认证失效、网络中断）会清除已显示的建议，直到下一次探测成功；离线或 host 重启时 1.5 秒退避后恢复。
+- **hanging GET 交付。** 浏览器半对 exact 路由保持一条挂起请求；建议状态变化（或 30 秒上限到期，客户端立即重新打开）的瞬间由 host 主动响应，新建议与回合失效都是即时的，无需客户端事件面。一次失败的状态探测（host 重启、会话淘汰、认证失效、网络中断）会清除已显示的建议，直到下一次探测成功，且首次重试不带版本号、强制获取完整状态，恢复不会卡在过期或重置的版本上；离线或 host 重启时 1.5 秒退避后恢复。
 - **快照保留有上限。** 最多 256 个会话保留请求快照（按最近最少使用淘汰）。会话或插件销毁时清除 tracker、中止全部尝试、清理计时器并结束挂起的响应。
 - **排除子代理回合。** DSH 子会话 header 带有 subagent origin 和 delegation depth，而子代理任务消息仍使用 `kind: "user"`；插件在捕获和生成前过滤这些会话。普通顶层会话（包括仅共享 parent lineage 的 fork）仍可生成。
 - **指令消息带生产者自有的 source kind。** V4 的持久化消息准入**拒收**已退役的 V3 写法 `{ kind: "plugin", plugin }`（报 `format v4 message requires a producer-owned source kind`——裸 `plugin` 不携带生产者身份）。指令与重试消息因此改用 `{ kind: "<插件名>", form: "notice" }`。
