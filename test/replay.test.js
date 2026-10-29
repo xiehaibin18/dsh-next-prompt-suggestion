@@ -198,6 +198,30 @@ test("stream reducer reports sawFinish and the chunk tally", () => {
 	assert.equal(reducer.chunkTypes, "block-start:1,text-delta:1,finish:1")
 })
 
+test("stream reducer enforces a local hard cap on streamed text deltas", () => {
+	const reducer = createStreamReducer({ maxChars: 10 })
+	assert.equal(reducer.push({ type: "text-delta", index: 0, text: "12345" }), "continue")
+	// Reaching the cap is fine; the first char past it trips the guard.
+	assert.equal(reducer.push({ type: "text-delta", index: 0, text: "123456" }), "over_limit")
+	assert.equal(reducer.overLimit, true)
+	// Terminal: further pushes keep reporting the overrun; the caller aborts.
+	assert.equal(reducer.push({ type: "text-delta", index: 0, text: "more" }), "over_limit")
+	assert.equal(reducer.text, "12345123456more")
+})
+
+test("stream reducer applies the cap to a whole text block too", () => {
+	const reducer = createStreamReducer({ maxChars: 5 })
+	const outcome = reducer.push({ type: "block-end", index: 0, block: { type: "text", text: "123456" } })
+	assert.equal(outcome, "over_limit")
+	assert.equal(reducer.overLimit, true)
+})
+
+test("stream reducer without a cap never reports over_limit", () => {
+	const reducer = createStreamReducer()
+	assert.equal(reducer.push({ type: "text-delta", index: 0, text: "x".repeat(262_144) }), "continue")
+	assert.equal(reducer.overLimit, false)
+})
+
 test("only stop is an adoptable finish", () => {
 	for (const kind of ["stop", "tool-calls", "max-tokens", "aborted", "error", "future-reason"]) {
 		const reducer = createStreamReducer()
