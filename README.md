@@ -23,9 +23,11 @@ exact route GET /api/plugins/next-prompt-suggestion?session=<id>
 browser half ─► placeholder takeover: ghost node mirroring the native placeholder (hanging GET, instant)
 ```
 
-Invalidation is structural: every `turn/start` aborts any in-flight replay and drops the previous suggestion, so a suggestion can never outlive the turn it belongs to. The replay is an ordinary `ctx.llm.stream()` call: it keeps the captured `toolHistory`, `sessionId`, `maxTokens`, `stop`, and every other request field, uses a fresh cancellation signal, and is excluded from capture by exact request-object ownership. It never retries transport, rate-limit, error, cancellation, or truncation failures.
+Invalidation is structural: every `turn/start` aborts any in-flight replay and drops the previous suggestion, and a surface `replace` event (manual `/compact` rewrites history between turns without opening one) does the same while also stopping a generation from publishing onto the replaced context. A suggestion can never outlive the context it belongs to. The replay is an ordinary `ctx.llm.stream()` call: it keeps the captured `toolHistory`, `sessionId`, `maxTokens`, `stop`, and every other request field, uses a fresh cancellation signal, and is excluded from capture by exact request-object ownership. It never retries transport, rate-limit, error, cancellation, or truncation failures.
 
 The attempt's terminal state decides. Only a `finish` reason of `stop` can produce a suggestion. A tool-call delta, a complete tool-call block, or a `tool-calls` finish rejects the attempt and gets exactly one retry with the same request prefix plus one rejection paragraph; tools are never executed. A second tool-call ending fails. Error, aborted, max-tokens, unknown, missing, and truncated finishes are rejected without salvaging earlier text. (Earlier diagnostics recorded an ostensibly empty replay from an abandoned synthetic tool-result shape, but those logs did not retain the finish reason, so the historical cause remains unverified.)
+
+While the model is still streaming, a local hard cap at twice `maxSuggestionChars` aborts an attempt whose text runs over; it is a runaway guard with headroom and never changes the captured request.
 
 ## Install
 
@@ -70,7 +72,7 @@ bun install
 bun run test   # node --test, including production apply(ctx, config) behavior tests
 ```
 
-`lib/prompt.js`, `lib/store.js`, and `lib/replay.js` are dependency-free and unit-tested (gating state machine, replay assembly, stream reduction, output normalization). Behavior tests also run the production `apply(ctx, config)` wiring for finish termination, retry limits, request parity, authentication, session bounds, subagent exclusion, disposal, and logging. `lib/client.js` is the browser half.
+`lib/prompt.js`, `lib/store.js`, and `lib/replay.js` are dependency-free and unit-tested (gating state machine, history-replacement invalidation, replay assembly, stream reduction, output normalization). Behavior tests also run the production `apply(ctx, config)` wiring for finish termination, retry limits, streaming overrun aborts, compaction invalidation, request parity, authentication, session bounds, subagent exclusion, disposal, and logging. `lib/client.js` is the browser half.
 
 ## Security notes
 
@@ -86,8 +88,8 @@ bun run test   # node --test, including production apply(ctx, config) behavior t
 - **Subagent turns are excluded.** DSH child sessions carry subagent origin and delegation depth in their headers while their task messages still use `kind: "user"`; the plugin filters those sessions before capture/generation. Top-level conversations, including forks that only share a parent lineage, remain eligible.
 - **The instruction carries a producer-owned source kind.** Durable V4 message admission refuses the retired V3 spelling `{ kind: "plugin", plugin }` — `format v4 message requires a producer-owned source kind`, because a bare `plugin` kind carries no producer identity. The instruction and its retry therefore use `{ kind: "<plugin name>", form: "notice" }`.
 - **No fixed generation timeout.** A replay runs until it finishes or a turn invalidates it; reasoning models can take 10-20s to emit the suggestion. `latencyCapMs` exists but defaults to disabled.
-- **Hanging-GET delivery.** The browser half keeps one hanging request open against the exact route; the host resolves it the moment the suggestion state changes (or after a 30s cap, which the client immediately re-opens), so a new suggestion and turn-start invalidation arrive instantly without a client-side event surface. Offline or host restart backs off 1.5s and resumes.
-- **Placeholder takeover, no local visibility state.** The suggestion rides the native `[data-composer-placeholder]` node: React mounts that node only for an empty draft, and a MutationObserver mirrors its (re)appearance with a same-class ghost carrying the suggestion text — typing hides, clearing restores, all for free. The suggestion disappears when the next turn starts or a newer one replaces it.
+- **Hanging-GET delivery.** The browser half keeps one hanging request open against the exact route; the host resolves it the moment the suggestion state changes (or after a 30s cap, which the client immediately re-opens), so a new suggestion and turn-start invalidation arrive instantly without a client-side event surface. A failed probe (host restart, session eviction, auth loss, network drop) clears the shown suggestion until the next successful probe; offline or host restart backs off 1.5s and resumes.
+- **Placeholder takeover, no local visibility state.** The suggestion rides the native `[data-composer-placeholder]` node: React mounts that node only for an empty draft, and a MutationObserver mirrors its (re)appearance with a same-class ghost carrying the suggestion text — typing hides, clearing restores, all for free. The suggestion disappears when the next turn starts, history is replaced, a newer one arrives, or the status probe fails.
 
 ## License
 

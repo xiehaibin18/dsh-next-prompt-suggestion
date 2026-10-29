@@ -448,6 +448,82 @@ test("finish failures log their safe code without raw failure or suggestion text
 	assert.equal(failureLog.line.includes("SECRET_RAW_PROVIDER_BODY"), false)
 })
 
+test("a runaway stream is aborted at the local cap without a retry", async () => {
+	const chunk = "a".repeat(40)
+	const harness = createHarness({
+		config: { maxSuggestionChars: 50 },
+		streams: [
+			fixedStream([
+				{ type: "text-delta", index: 0, text: chunk },
+				{ type: "text-delta", index: 0, text: chunk },
+				{ type: "text-delta", index: 0, text: chunk },
+				{ type: "finish", reason: { kind: "stop" } },
+			]),
+		],
+	})
+	const targetSession = session("stream-cap")
+	capture(harness, modelRequest(targetSession.id))
+	runCleanHumanTurn(harness, targetSession)
+	await settle()
+
+	const response = await queryRoute(harness, targetSession.id)
+	assert.equal(response.payload.suggestion, null)
+	// The reducer rejects at the cap (40*3 = 120 > 2*50), so the retry never
+	// starts and the trailing finish never turns the overrun into a result.
+	assert.equal(harness.streamCalls.length, 1)
+	const capLog = harness.logEntries.find((entry) => entry.line.includes("next-prompt-suggestion: over_limit "))
+	assert.ok(capLog !== undefined)
+	assert.ok(capLog.line.includes("chars=120 cap=100"))
+})
+
+test("a manual compaction replacement aborts the in-flight generation and clears state", async () => {
+	const releaseStream = (() => {
+		let release
+		const gate = new Promise((resolve) => {
+			release = resolve
+		})
+		return {
+			stream: () =>
+				(async function* () {
+					await gate
+					yield { type: "text-delta", index: 0, text: "stale next prompt" }
+					yield { type: "finish", reason: { kind: "stop" } }
+				})(),
+			release,
+		}
+	})()
+	const harness = createHarness({ streams: [releaseStream.stream] })
+	const targetSession = session("compaction-replace")
+	capture(harness, modelRequest(targetSession.id))
+	runCleanHumanTurn(harness, targetSession)
+	await waitFor(() => harness.streamCalls.length === 1)
+
+	// DSH's manual `/compact` runs `runMaintenance()` between turns: the
+	// replacement surface event never opens a turn.
+	harness.emit("session/event", targetSession, {
+		type: "user/message",
+		surfaceOp: { op: "replace", startSeq: 1, endSeq: 3 },
+		data: {
+			id: "compaction-summary",
+			role: "user",
+			content: [textBlock("compacted summary")],
+			source: { kind: "compaction", form: "summary" },
+		},
+	})
+	releaseStream.release()
+	await settle()
+
+	const response = await queryRoute(harness, targetSession.id)
+	assert.equal(response.statusCode, 200)
+	assert.equal(response.payload.suggestion, null)
+	assert.equal(harness.streamCalls.length, 1)
+	const cancelLog = harness.logEntries.find((entry) =>
+		entry.line.includes("next-prompt-suggestion: cancelled "),
+	)
+	assert.ok(cancelLog !== undefined)
+	assert.ok(cancelLog.line.includes("reason=history_replaced"))
+})
+
 test("production capture preserves the full request and excludes its own replay and purpose side calls", async () => {
 	const harness = createHarness({
 		streams: [

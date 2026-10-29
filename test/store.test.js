@@ -182,6 +182,64 @@ test("turn/start bumps the version and notifies only when a suggestion was live"
 	assert.deepEqual(versions, [1, 2])
 })
 
+test("a surface replace event invalidates the suggestion and cancels in-flight work", () => {
+	const tracker = new SuggestionTracker()
+	tracker.captureRequest(request("s1"))
+	tracker.onSessionEvent(turnStart(1))
+	tracker.onSessionEvent(humanMessage(1))
+	tracker.onSessionEvent(assistantMessage(1, 1, [textBlock("done")]))
+	const generate = tracker.onSessionEvent(turnEnd(1))
+	assert.equal(generate.type, "generate")
+	assert.equal(generate.contextVersion, 0)
+	tracker.setSuggestion({ text: "old", turn: 1, anchorMessageId: "a-1-1", createdAt: 1 })
+
+	// Manual `/compact` runs between turns: a surface `replace` event over
+	// the compacted range, without opening a turn.
+	const compaction = {
+		type: "user/message",
+		surfaceOp: { op: "replace", startSeq: 1, endSeq: 3 },
+		data: { id: "compact-1", role: "user", content: [textBlock("summary")], source: { kind: "compaction", form: "summary" } },
+	}
+	const action = tracker.onSessionEvent(compaction)
+	assert.deepEqual(action, { type: "cancel_inflight", reason: "history_replaced" })
+	assert.equal(tracker.getSuggestion(), null)
+	assert.equal(tracker.contextVersion, 1)
+})
+
+test("append surface events and log-only events never bump the context version", () => {
+	const tracker = new SuggestionTracker()
+	tracker.captureRequest(request("s1"))
+	tracker.onSessionEvent(turnStart(1))
+	assert.equal(tracker.contextVersion, 0)
+	assert.equal(tracker.onSessionEvent(humanMessage(1)).type, "none")
+	assert.equal(tracker.contextVersion, 0)
+	const append = { ...humanMessage(1), surfaceOp: "append" }
+	assert.equal(tracker.onSessionEvent(append).type, "none")
+	assert.equal(tracker.contextVersion, 0)
+})
+
+test("a generate action records the context version it started against", () => {
+	const tracker = new SuggestionTracker()
+	tracker.captureRequest(request("s1"))
+	tracker.onSessionEvent(turnStart(1))
+	tracker.onSessionEvent(humanMessage(1))
+	tracker.onSessionEvent(assistantMessage(1, 1, [textBlock("done")]))
+	assert.equal(tracker.onSessionEvent(turnEnd(1)).contextVersion, 0)
+
+	// A replaced history must no longer satisfy a stale generation.
+	tracker.onSessionEvent({
+		type: "assistant/message",
+		surfaceOp: { op: "replace", startSeq: 2, endSeq: 4 },
+		data: assistantMessage(1, 1, [textBlock("done")]).data,
+	})
+	tracker.onSessionEvent(turnStart(2))
+	tracker.onSessionEvent(humanMessage(2))
+	tracker.onSessionEvent(assistantMessage(2, 1, [textBlock("done again")]))
+	const action = tracker.onSessionEvent(turnEnd(2))
+	assert.equal(action.type, "generate")
+	assert.equal(action.contextVersion, 1)
+})
+
 test("setSuggestion notifies on change and stays quiet on identical text", () => {
 	const tracker = new SuggestionTracker()
 	const versions = []

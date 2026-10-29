@@ -245,6 +245,93 @@ const createReactHarness = (current, documentRef, mountTarget) => {
 	}
 }
 
+/**
+ * Minimal stateful React harness: re-renders on setState and runs effects
+ * with dependency tracking, so the polling loop's success/failure branches
+ * can be driven without a real React.
+ */
+const createDynamicReactHarness = (documentRef, mountTarget) => {
+	const slots = []
+	let hookCursor = 0
+	let runEffects = []
+	let lastEffects = []
+	let currentTree = null
+	let mountedComponent = null
+	let mountedProps = null
+
+	const depsEqual = (a, b) =>
+		Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, index) => Object.is(value, b[index]))
+
+	const react = {
+		createElement: (type, props, ...children) => {
+			if (typeof type !== "string") return { type, props: props ?? {}, children }
+			const element = documentRef.createElement(type)
+			if (props?.className !== undefined) element.className = props.className
+			if (props?.style !== undefined) Object.assign(element.style, props.style)
+			if (props?.ref !== undefined) props.ref.current = element
+			element.append(...children.filter((child) => child instanceof FakeElement))
+			return element
+		},
+		useRef: (value) => {
+			const index = hookCursor++
+			if (slots[index] === undefined) slots[index] = { current: value }
+			return slots[index]
+		},
+		useState: (initial) => {
+			const index = hookCursor++
+			if (slots[index] === undefined) slots[index] = { value: initial }
+			const slot = slots[index]
+			const setState = (next) => {
+				slot.value = typeof next === "function" ? next(slot.value) : next
+				render()
+			}
+			return [slot.value, setState]
+		},
+		useEffect: (effect, deps) => {
+			runEffects.push({ index: hookCursor++, effect, deps })
+		},
+	}
+
+	const render = () => {
+		runEffects = []
+		hookCursor = 0
+		if (currentTree !== null) currentTree.remove()
+		currentTree = mountedComponent(mountedProps)
+		mountTarget.append(currentTree)
+		const previousByIndex = new Map(lastEffects.map((entry) => [entry.index, entry]))
+		const mountedIndexes = new Set()
+		for (const entry of runEffects) {
+			mountedIndexes.add(entry.index)
+			const previous = previousByIndex.get(entry.index)
+			if (previous !== undefined && depsEqual(previous.deps, entry.deps)) {
+				entry.cleanup = previous.cleanup
+				continue
+			}
+			previous?.cleanup?.()
+			entry.cleanup = entry.effect()
+		}
+		for (const [index, previous] of previousByIndex) {
+			if (mountedIndexes.has(index) === false) previous.cleanup?.()
+		}
+		lastEffects = runEffects
+	}
+
+	return {
+		react,
+		mount(component, props) {
+			mountedComponent = component
+			mountedProps = props
+			render()
+		},
+		unmount() {
+			for (const entry of lastEffects) entry.cleanup?.()
+			lastEffects = []
+			if (currentTree !== null) currentTree.remove()
+			currentTree = null
+		},
+	}
+}
+
 const mountSuggestion = (dom) => {
 	const { registrations } = loadClientBundle({
 		document: dom.document,
@@ -277,6 +364,8 @@ const mountSuggestion = (dom) => {
 	})
 	return component
 }
+
+const settle = () => new Promise((resolve) => setImmediate(resolve))
 
 const tabEvent = (dom, target = dom.editor, overrides = {}) => {
 	const event = {
@@ -344,6 +433,96 @@ test("client apply registers the overlay entry with a per-session inject face", 
 	const face = captured[0].entry.inject("session-1")
 	assert.equal(face.suggestion.sessionId, "session-1")
 	assert.equal(typeof face.suggestion.load, "function")
+})
+
+test("client apply skips registration when the plugin is disabled", () => {
+	const { registrations } = loadClientBundle()
+	const exports = registrations[0].factory(reactStub)
+	let injectCalls = 0
+	const ctx = {
+		slots: {
+			inject: () => {
+				injectCalls += 1
+			},
+			register: () => undefined,
+		},
+	}
+	exports.apply(ctx, { enabled: false })
+	assert.equal(injectCalls, 0)
+})
+
+test("a failed status probe clears the shown suggestion until the next success", async () => {
+	const dom = createComposerDom({ current: null, placeholder: true })
+	// Park retry timers instead of firing them: the test drives the loop's
+	// turns directly and must not leave real timers behind.
+	const parkedTimers = []
+	const { registrations } = loadClientBundle({
+		document: dom.document,
+		MutationObserver: dom.MutationObserver,
+		setTimeout: (callback) => {
+			parkedTimers.push(callback)
+			return parkedTimers.length
+		},
+		fetch: async () => {
+			throw new Error("fetch must not run in this fixture")
+		},
+	})
+	const harness = createDynamicReactHarness(dom.document, dom.overlay)
+	const exports = registrations[0].factory((specifier) => {
+		if (specifier === "react") return harness.react
+		throw new Error(`unexpected client dependency: ${specifier}`)
+	})
+	let component = null
+	const ctx = {
+		slots: {
+			inject: (_slotName, register) => register(),
+			register: (_entry, registeredComponent) => {
+				component = registeredComponent
+				return _entry
+			},
+		},
+	}
+	exports.apply(ctx, {})
+
+	let loadCalls = 0
+	let rejectSecondLoad = null
+	const loads = [
+		() => Promise.resolve({ suggestion: { text: "run the tests" }, v: 1 }),
+		// Park the probe the way a hanging GET would, so the shown state can
+		// be asserted before the failure lands.
+		() =>
+			new Promise((_resolve, reject) => {
+				rejectSecondLoad = () => reject(new Error("suggestion route HTTP 404"))
+			}),
+		() => Promise.resolve({ suggestion: null, v: 2 }),
+	]
+	const suggestionFace = {
+		sessionId: "session-1",
+		load: async () => {
+			const make = loads[Math.min(loadCalls, loads.length - 1)]
+			loadCalls += 1
+			return make()
+		},
+	}
+	harness.mount(component, { suggestion: suggestionFace })
+
+	const ghost = () => dom.card.querySelector('[data-next-prompt-suggestion-ghost="true"]')
+	for (let index = 0; index < 4; index += 1) await settle()
+	dom.mutations()
+	assert.notEqual(ghost(), null)
+	assert.equal(ghost().textContent, "run the tests")
+	assert.equal(loadCalls, 2)
+
+	// The parked probe rejects, so the previously shown suggestion must be
+	// dropped instead of surviving into the next loop turn.
+	rejectSecondLoad()
+	for (let index = 0; index < 4; index += 1) await settle()
+	assert.equal(ghost(), null)
+	const event = tabEvent(dom)
+	assert.equal(event.defaultPrevented, false)
+	assert.equal(dom.execCalls.length, 0)
+
+	harness.unmount()
 })
 
 test("client classic script can reload twice in the same JavaScript global context", () => {
